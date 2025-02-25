@@ -167,8 +167,7 @@ mod tests {
                 let input = path.to_str().expect("Invalid path string");
 
                 // Open the image using the image crate.
-                let img = image::open(input)
-                    .unwrap_or_else(|e| panic!("Failed to open {}: {:?}", input, e));
+                let img = parse_file(input).unwrap();
 
                 // Generate a thumbnail.
                 let thumb = generate_thumbnail(&img, max_dimension);
