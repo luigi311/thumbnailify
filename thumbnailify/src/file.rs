@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, io::BufWriter, path::PathBuf};
+use std::{fs::{self, File}, io::BufWriter, os::linux::fs::MetadataExt, path::PathBuf};
 use jxl_oxide::integration::JxlDecoder;
 use url::Url;
 use std::path::Path;
@@ -101,7 +101,7 @@ pub fn write_out_thumbnail(
     let size = metadata.len();
     encoder.add_text_chunk("Thumb::Size".to_string(), size.to_string())?;
 
-    let mtime = metadata.modified()?.elapsed()?.as_secs();
+    let mtime = metadata.st_mtime();
     encoder.add_text_chunk("Thumb::MTime".to_string(), mtime.to_string())?;
 
     let mut writer = encoder.write_header()?;

@@ -1,11 +1,80 @@
+use std::fs::File;
+use std::os::linux::fs::MetadataExt;
+use std::path::Path;
+
 use fast_image_resize::{ResizeAlg, ResizeOptions, Resizer};
 use image::DynamicImage;
 use image::{GenericImageView, ImageError};
+use png::Decoder;
 
 
 use crate::hash::compute_hash;
 use crate::sizes::ThumbnailSize;
 use crate::file::{get_file_uri, get_thumbnail_hash_output, parse_file, write_out_thumbnail};
+
+
+/// Checks whether the thumbnail file at `thumb_path` is up to date with respect
+/// to the source image at `source_path`. It verifies two metadata fields in the PNG:
+/// 
+/// - "Thumb::MTime": the source file's modification time (in seconds since UNIX_EPOCH)
+/// - "Thumb::Size": the source file's size in bytes (only checked if present)
+///
+/// Returns true if "Thumb::MTime" is present and matches the source file's modification time,
+/// and if "Thumb::Size" is present it must match the source file's size.
+pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &str) -> bool {
+    // Open the thumbnail file.
+    let file: File = match File::open(thumb_path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let decoder = Decoder::new(file);
+    let reader = match decoder.read_info() {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+
+    // Retrieve text chunks from the PNG.
+    let texts = &reader.info().uncompressed_latin1_text;
+
+    // The Thumb::MTime key is mandatory.
+    let thumb_mtime_str = match texts.iter().find(|chunk| chunk.keyword == "Thumb::MTime") {
+        Some(chunk) => &chunk.text,
+        None => return false,
+    };
+
+    // Parse the stored modification time.
+    let thumb_mtime: i64 = match thumb_mtime_str.parse::<i64>() {
+        Ok(val) => val,
+        Err(_) => return false,
+    };
+
+    // Get the source file's metadata.
+    let source_metadata: std::fs::Metadata = match std::fs::metadata(source_path) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    let source_mtime: i64 = source_metadata.st_mtime();
+    
+    // Check the modification time.
+    if thumb_mtime != source_mtime {
+        return false;
+    }
+
+    // If Thumb::Size is present, check that it matches the source file size.
+    if let Some(chunk) = texts.iter().find(|chunk| chunk.keyword == "Thumb::Size") {
+        let thumb_size = match chunk.text.parse::<u64>() {
+            Ok(val) => val,
+            Err(_) => return false,
+        };
+        let source_file_size: u64 = source_metadata.len();
+        if thumb_size != source_file_size {
+            return false;
+        }
+    }
+
+    true
+}
 
 /// Resizes the given image using the provided max pixel size for its smallest dimension,
 /// and returns the scaled-down image. Uses a fast filter (Triangle) for downsizing.
@@ -61,9 +130,9 @@ pub fn create_thumbnails(
     
     for &size in sizes {
         let output_path = get_thumbnail_hash_output(&hash, size);
-        // If the output file already exists, skip this size.
-        if output_path.exists() {
-            println!("{:?} already exists", output_path);
+        // If the output file already exists, check to see if thumbnail needs to be updated
+        if output_path.exists() && is_thumbnail_up_to_date(&output_path, input) {
+            println!("{:?} already exists and is up-to-date", output_path);
             continue;
         }
 
@@ -140,4 +209,15 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_create_thumbnails() {
+        // Directory containing test images.
+        let image = "../tests/images/nasa-4019x4019.png";
+        let sizes = [ThumbnailSize::Small, ThumbnailSize::Normal];
+        create_thumbnails(image, &sizes).unwrap();
+
+    }
 }
+
+
