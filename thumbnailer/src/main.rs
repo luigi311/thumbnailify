@@ -1,7 +1,7 @@
 use clap::Parser;
 use image::{DynamicImage, ImageError};
 use std::process;
-use thumbnailify::thumbnail::{generate_thumbnail, parse_file};
+use thumbnailify::{generate_thumbnail, parse_file, write_out_thumbnail};
 
 /// Thumbnail images
 #[derive(Parser, Debug)]
@@ -29,7 +29,7 @@ fn run(args: Args) -> Result<(), ImageError> {
     let thumb = generate_thumbnail(&img, args.size);
 
     // Save the thumbnail to the specified output file.
-    thumb.save(&args.output)?;
+    write_out_thumbnail(&args.output, thumb, &args.input).expect("Failed to write thumbnail");
 
     Ok(())
 }
