@@ -8,4 +8,3 @@ resolver = "3"
 [profile.release]
 lto = "thin"
 opt-level = 3
-strip = true
