@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, io::BufWriter, os::linux::fs::MetadataExt, path::PathBuf};
+use std::{fs::{self, File}, io::BufWriter, path::PathBuf, time::UNIX_EPOCH};
 use jxl_oxide::integration::JxlDecoder;
 use url::Url;
 use std::path::Path;
@@ -75,13 +75,17 @@ pub fn get_file_uri(input: &str) -> String {
     url.to_string()
 }
 
+/// Writes out the thumbnail as a PNG, embedding metadata in XDG style:
+/// - Thumb::URI
+/// - Thumb::Size
+/// - Thumb::MTime
 pub fn write_out_thumbnail(
     image_path: &str,
     img: DynamicImage,
     source_image_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::create(image_path)?;
-    
+
     let rgba_image: RgbaImage = img.to_rgba8();
     let (width, height) = rgba_image.dimensions();
     let buffer = rgba_image.into_raw();
@@ -92,17 +96,26 @@ pub fn write_out_thumbnail(
     encoder.set_depth(png::BitDepth::Eight);
 
     encoder.add_text_chunk("Software".to_string(), "Thumbnailify".to_string())?;
-    
+
     let uri = get_file_uri(source_image_path);
     encoder.add_text_chunk("Thumb::URI".to_string(), uri)?;
 
     let metadata = fs::metadata(source_image_path)?;
-    
+
+    // Store file size
     let size = metadata.len();
     encoder.add_text_chunk("Thumb::Size".to_string(), size.to_string())?;
 
-    let mtime = metadata.st_mtime();
-    encoder.add_text_chunk("Thumb::MTime".to_string(), mtime.to_string())?;
+    // Cross-platform approach for the file's last modification time:
+    // 1) Get the `SystemTime`.
+    // 2) Convert to a Unix timestamp in seconds since the epoch.
+    let modified_time = metadata.modified()?;
+    let mtime_unix = modified_time
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    encoder.add_text_chunk("Thumb::MTime".to_string(), mtime_unix.to_string())?;
 
     let mut writer = encoder.write_header()?;
     writer.write_image_data(&buffer)?;

@@ -1,6 +1,6 @@
 use std::fs::File;
-use std::os::linux::fs::MetadataExt;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use fast_image_resize::{ResizeAlg, ResizeOptions, Resizer};
 use image::DynamicImage;
@@ -22,7 +22,6 @@ use crate::file::{get_file_uri, get_thumbnail_hash_output, parse_file, write_out
 /// Returns true if "Thumb::MTime" is present and matches the source file's modification time,
 /// and if "Thumb::Size" is present it must match the source file's size.
 pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &str) -> bool {
-    // Open the thumbnail file.
     let file: File = match File::open(thumb_path) {
         Ok(f) => f,
         Err(_) => return false,
@@ -34,7 +33,6 @@ pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &str) -> bool {
         Err(_) => return false,
     };
 
-    // Retrieve text chunks from the PNG.
     let texts = &reader.info().uncompressed_latin1_text;
 
     // The Thumb::MTime key is mandatory.
@@ -43,25 +41,29 @@ pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &str) -> bool {
         None => return false,
     };
 
-    // Parse the stored modification time.
-    let thumb_mtime: i64 = match thumb_mtime_str.parse::<i64>() {
+    // Parse the stored modification time as a u64 (Unix timestamp in seconds).
+    let thumb_mtime: u64 = match thumb_mtime_str.parse::<u64>() {
         Ok(val) => val,
         Err(_) => return false,
     };
 
-    // Get the source file's metadata.
-    let source_metadata: std::fs::Metadata = match std::fs::metadata(source_path) {
+    // Get source metadata in a cross-platform manner
+    let source_metadata = match std::fs::metadata(source_path) {
         Ok(m) => m,
         Err(_) => return false,
     };
-    let source_mtime: i64 = source_metadata.st_mtime();
-    
-    // Check the modification time.
-    if thumb_mtime != source_mtime {
+
+    // Convert source's SystemTime to a Unix timestamp
+    let source_modified_time = match source_metadata.modified() {
+        Ok(mt) => mt.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+        Err(_) => return false,
+    };
+
+    if thumb_mtime != source_modified_time {
         return false;
     }
 
-    // If Thumb::Size is present, check that it matches the source file size.
+    // If "Thumb::Size" is present, check that it matches
     if let Some(chunk) = texts.iter().find(|chunk| chunk.keyword == "Thumb::Size") {
         let thumb_size = match chunk.text.parse::<u64>() {
             Ok(val) => val,
@@ -214,7 +216,7 @@ mod tests {
     fn test_create_thumbnails() {
         // Directory containing test images.
         let image = "../tests/images/nasa-4019x4019.png";
-        let sizes = [ThumbnailSize::Small, ThumbnailSize::Normal];
+        let sizes = [ThumbnailSize::Small, ThumbnailSize::Normal, ThumbnailSize::Large];
         create_thumbnails(image, &sizes).unwrap();
 
     }
