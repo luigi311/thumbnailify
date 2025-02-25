@@ -16,3 +16,10 @@ url = "2.5.4"
 
 [features]
 avif = ["image/avif-native"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "benchmark"
+harness = false
