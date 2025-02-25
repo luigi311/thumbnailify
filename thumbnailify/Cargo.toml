@@ -13,6 +13,7 @@ image = { version = "0.25.5" }
 jxl-oxide = { version = "0.11.2", features = ["image"] }
 md-5 = "0.10.6"
 png = "0.17.16"
+thiserror = "2.0.11"
 url = "2.5.4"
 
 [features]
