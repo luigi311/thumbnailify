@@ -86,7 +86,7 @@ pub fn generate_thumbnail(
     let dst_width = (width as f32 * scale).round() as u32;
     let dst_height = (height as f32 * scale).round() as u32;
 
-    let mut dst_image = DynamicImage::new_rgba8(dst_width, dst_height);
+    let mut dst_image = DynamicImage::new(dst_width, dst_height, img.color());
 
     let mut resizer = Resizer::new();
 
