@@ -2,7 +2,7 @@ use std::{fs::File, io::BufWriter, path::PathBuf, time::UNIX_EPOCH};
 use jxl_oxide::integration::JxlDecoder;
 use url::Url;
 use std::path::Path;
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, ImageReader, Limits, RgbaImage};
 use png::Encoder;
 
 
@@ -40,7 +40,16 @@ pub fn parse_file(input: &str) -> Result<DynamicImage, ThumbnailError> {
                 ))?;
             image::DynamicImage::from_decoder(decoder)?
         }
-        _ => image::open(input)?,
+        _ => {
+            let mut reader = ImageReader::open(input)?;
+
+            // Set the memory limit to 1GB
+            let mut limits = Limits::default();
+            limits.max_alloc = Some(1024 * 1024 * 1024);
+            reader.limits(limits);
+
+            reader.with_guessed_format()?.decode()?
+        }
     };
 
     Ok(dyn_img)
