@@ -119,26 +119,39 @@ pub fn create_thumbnails(input: &str, sizes: &[ThumbnailSize]) -> Result<(), Thu
     let uri = get_file_uri(input)?;
     let hash = compute_hash(uri);
 
+    // Determine which thumbnail sizes need to be regenerated.
+    let sizes_to_update: Vec<ThumbnailSize> = sizes
+        .iter()
+        .cloned()
+        .filter(|&size| {
+            let output_path = get_thumbnail_hash_output(&hash, size);
+            // If the thumbnail doesn't exist or is out-of-date, we need to update.
+            !output_path.exists() || !is_thumbnail_up_to_date(&output_path, input)
+        })
+        .collect();
+
+    // If all thumbnails are up-to-date, we can return early.
+    if sizes_to_update.is_empty() {
+        eprintln!("All thumbnails are up-to-date.");
+        return Ok(());
+    }
+
+    // Only now do we parse the image file (which is relatively expensive).
     let img = parse_file(input)?;
 
-    for &size in sizes {
+    // Generate and write out thumbnails for only the sizes that need updating.
+    for size in sizes_to_update {
         let output_path = get_thumbnail_hash_output(&hash, size);
-
-        if output_path.exists() && is_thumbnail_up_to_date(&output_path, input) {
-            eprintln!("{:?} is up-to-date, skipping.", output_path);
-            continue;
-        }
-
         let max_dimension = size.to_dimension();
         let thumb = generate_thumbnail(&img, max_dimension)?;
 
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;  // => ThumbnailError::Io
+            std::fs::create_dir_all(parent)?;
         }
 
-        let path_str = output_path
-            .to_str()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in path"))?;
+        let path_str = output_path.to_str().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in path")
+        })?;
 
         write_out_thumbnail(path_str, thumb, input)?;
     }
