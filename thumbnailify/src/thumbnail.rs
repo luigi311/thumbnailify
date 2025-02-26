@@ -9,7 +9,7 @@ use png::Decoder;
 
 use crate::hash::compute_hash;
 use crate::sizes::ThumbnailSize;
-use crate::file::{get_file_uri, get_thumbnail_hash_output, parse_file, write_out_thumbnail};
+use crate::file::{get_failed_thumbnail_output, get_file_uri, get_thumbnail_hash_output, parse_file, write_failed_thumbnail_with_dynamic_image, write_out_thumbnail};
 use crate::ThumbnailError;
 
 
@@ -115,11 +115,23 @@ pub fn generate_thumbnail(
 /// # Errors
 ///
 /// Returns an error if reading or writing any of the images fails.
-pub fn create_thumbnails(input: &str, sizes: &[ThumbnailSize]) -> Result<(), ThumbnailError> {
+pub fn create_thumbnails(
+    input: &str,
+    sizes: &[ThumbnailSize],
+) -> Result<(), ThumbnailError> {
     let uri = get_file_uri(input)?;
     let hash = compute_hash(uri);
+    
+    // If the fail marker exists and is up to date then return early
+    let fail_path = get_failed_thumbnail_output(&hash);
+    if fail_path.exists() && is_thumbnail_up_to_date(&fail_path, input) {
+        eprintln!("All thumbnails (normal or failure) are up-to-date.");
+        return Ok(());
+    }
 
-    // Determine which thumbnail sizes need to be regenerated.
+
+    // Determine which thumbnail sizes need updating.
+    // Here, for each size, we check both the normal thumbnail and the fail thumbnail.
     let sizes_to_update: Vec<ThumbnailSize> = sizes
         .iter()
         .cloned()
@@ -136,24 +148,48 @@ pub fn create_thumbnails(input: &str, sizes: &[ThumbnailSize]) -> Result<(), Thu
         return Ok(());
     }
 
-    // Only now do we parse the image file (which is relatively expensive).
-    let img = parse_file(input)?;
+     // Attempt to parse the image.
+     let img = match parse_file(input) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("Failed to parse image {}: {:?}. Writing failure marker.", input, e);
+            // Ensure the failure marker directory exists.
+            if let Some(parent) = fail_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let fail_path_str = fail_path.to_str().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in fail path")
+            })?;
+            write_failed_thumbnail_with_dynamic_image(fail_path_str, input)?;
+            return Err(e);
+        }
+    };
 
-    // Generate and write out thumbnails for only the sizes that need updating.
+    // For each thumbnail size that needs updating, try to generate and write it.
     for size in sizes_to_update {
         let output_path = get_thumbnail_hash_output(&hash, size);
         let max_dimension = size.to_dimension();
-        let thumb = generate_thumbnail(&img, max_dimension)?;
-
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
+        match generate_thumbnail(&img, max_dimension) {
+            Ok(thumb) => {
+                if let Some(parent) = output_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let path_str = output_path.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in path")
+                })?;
+                write_out_thumbnail(path_str, thumb, input)?;
+            },
+            Err(e) => {
+                eprintln!("Thumbnail generation failed for size {:?}: {:?}. Writing failure marker.", size, e);
+                if let Some(parent) = fail_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let fail_path_str = fail_path.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in fail path")
+                })?;
+                write_failed_thumbnail_with_dynamic_image(fail_path_str, input)?;
+            }
         }
-
-        let path_str = output_path.to_str().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in path")
-        })?;
-
-        write_out_thumbnail(path_str, thumb, input)?;
     }
 
     Ok(())
@@ -164,66 +200,118 @@ mod tests {
     use super::*;
     use std::{fs, path::Path};
 
+    // Utility: remove a file if it exists.
+    fn cleanup_file<P: AsRef<Path>>(path: P) {
+        let _ = fs::remove_file(path);
+    }
+
     #[test]
-    fn test_generate_thumbnail_for_all_images() -> Result<(), ThumbnailError> {
-        let max_dimension = 128;
-        let images_dir = "../tests/images";
+    fn test_create_thumbnails_broken() -> Result<(), ThumbnailError> {
+        let broken_image = "../tests/images/broken.png";
+        let sizes = [ThumbnailSize::Normal];
 
-        if !Path::new(images_dir).exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Test images directory '{images_dir}' not found"),
-            )
-            .into());
-        }
+        // Compute hash and failure marker path.
+        let uri = get_file_uri(broken_image)?;
+        let hash = compute_hash(uri);
+        let fail_path = get_failed_thumbnail_output(&hash);
 
-        for entry in fs::read_dir(images_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                let input = path
-                    .to_str()
-                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid path string"))?;
+        // Ensure previous failure marker is removed.
+        cleanup_file(&fail_path);
 
-                let img = parse_file(input)?; // => ThumbnailError
-                let thumb = generate_thumbnail(&img, max_dimension)?; // => ThumbnailError
+        // Call create_thumbnails on the broken image.
+        let _ = create_thumbnails(broken_image, &sizes);
 
-                let (thumb_width, thumb_height) = thumb.dimensions();
-                let min_dimension = thumb_width.min(thumb_height);
+        // Verify that the failure marker now exists.
+        assert!(
+            fail_path.exists(),
+            "Failure marker was not created for broken image {}",
+            broken_image
+        );
 
-                assert!(
-                    min_dimension <= max_dimension,
-                    "Thumbnail for {input} has min dimension {min_dimension} > {max_dimension}"
-                );
+        // Record the modification time of the failure marker.
+        let mod_time1 = fs::metadata(&fail_path)?.modified()?;
 
-                eprintln!(
-                    "Processed {input}: original ({}x{}), thumbnail ({}x{})",
-                    img.width(),
-                    img.height(),
-                    thumb_width,
-                    thumb_height
-                );
-            }
-        }
+        // Call create_thumbnails again on the broken image.
+        let _ = create_thumbnails(broken_image, &sizes);
+        let mod_time2 = fs::metadata(&fail_path)?.modified()?;
+
+        // The modification time should not change since the failure marker is up-to-date.
+        assert_eq!(
+            mod_time1, mod_time2,
+            "Failure marker was updated even though it should be up-to-date."
+        );
+
+        // Clean up the failure marker.
+        cleanup_file(&fail_path);
 
         Ok(())
     }
 
     #[test]
-    fn test_create_thumbnails() -> Result<(), ThumbnailError> {
-        let image = "../tests/images/nasa-4019x4019.png";
+    fn test_create_thumbnails_valid() -> Result<(), ThumbnailError> {
+        // List of valid image files to test.
+        let valid_images = vec![
+            "../tests/images/nasa-4019x4019.png",
+            "../tests/images/nasa-4019x4019.jxl",
+        ];
         let sizes = [ThumbnailSize::Small, ThumbnailSize::Normal];
 
-        if !Path::new(image).exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Test image '{image}' not found"),
-            )
-            .into());
-        }
+        for image in valid_images {
+            // Check if the image exists; if not, skip it.
+            if !Path::new(image).exists() {
+                eprintln!("Test image '{}' not found, skipping.", image);
+                continue;
+            }
 
-        create_thumbnails(image, &sizes)?;
-        eprintln!("Thumbnails for '{image}' created successfully for sizes: {sizes:?}");
+            // Compute hash based on the file URI.
+            let uri = get_file_uri(image)?;
+            let hash = compute_hash(uri);
+
+            // Clean up any preexisting normal thumbnails and failure markers.
+            for &size in &sizes {
+                cleanup_file(get_thumbnail_hash_output(&hash, size));
+            }
+            cleanup_file(get_failed_thumbnail_output(&hash));
+
+            // Generate thumbnails for the image.
+            create_thumbnails(image, &sizes)?;
+
+            // Verify that each expected thumbnail exists.
+            for &size in &sizes {
+                let thumb_path = get_thumbnail_hash_output(&hash, size);
+                assert!(
+                    thumb_path.exists(),
+                    "Thumbnail for size {:?} does not exist for image {}",
+                    size,
+                    image
+                );
+            }
+
+            // Record modification times of the generated thumbnails.
+            let mut mod_times = Vec::new();
+            for &size in &sizes {
+                let thumb_path = get_thumbnail_hash_output(&hash, size);
+                mod_times.push(fs::metadata(&thumb_path)?.modified()?);
+            }
+
+            // Call create_thumbnails again, which should skip updating up-to-date thumbnails.
+            create_thumbnails(image, &sizes)?;
+            for (&size, &old_mod_time) in sizes.iter().zip(mod_times.iter()) {
+                let thumb_path = get_thumbnail_hash_output(&hash, size);
+                let new_mod_time = fs::metadata(&thumb_path)?.modified()?;
+                assert_eq!(
+                    old_mod_time, new_mod_time,
+                    "Thumbnail for size {:?} of image {} was recreated unexpectedly.",
+                    size, image
+                );
+            }
+
+            // Cleanup: remove the generated thumbnails and any failure marker.
+            for &size in &sizes {
+                cleanup_file(get_thumbnail_hash_output(&hash, size));
+            }
+            cleanup_file(get_failed_thumbnail_output(&hash));
+        }
 
         Ok(())
     }

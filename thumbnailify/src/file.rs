@@ -2,7 +2,7 @@ use std::{fs::File, io::BufWriter, path::PathBuf, time::UNIX_EPOCH};
 use jxl_oxide::integration::JxlDecoder;
 use url::Url;
 use std::path::Path;
-use image::{DynamicImage, ImageReader, Limits, RgbaImage};
+use image::{DynamicImage, ImageReader, Limits, Rgba, RgbaImage};
 use png::Encoder;
 
 
@@ -138,4 +138,27 @@ fn map_png_err(err: png::EncodingError) -> ThumbnailError {
         std::io::ErrorKind::Other,
         format!("PNG encoding error: {err}"),
     )))
+}
+
+/// Returns the output path for a failed thumbnail marker.
+/// This uses the fails folder under the thumbnails cache.
+pub fn get_failed_thumbnail_output(hash: &str) -> PathBuf {
+    let base_cache_dir = dirs::cache_dir().unwrap_or_else(|| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".cache")
+    });
+    // Build the application-specific fail directory.
+    let fail_dir = base_cache_dir.join("thumbnails").join("fail").join("thumbnailify");
+    let output_file = format!("{}.png", hash);
+    fail_dir.join(output_file)
+}
+
+/// Writes a failed thumbnail using an empty (1x1 transparent) DynamicImage.
+pub fn write_failed_thumbnail_with_dynamic_image(fail_path: &str, source_path: &str) -> Result<(), ThumbnailError> {
+    // Create a 1x1 transparent image.
+    let failed_img: DynamicImage = DynamicImage::ImageRgba8(
+        RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]))
+    );
+
+    write_out_thumbnail(fail_path, failed_img, source_path)
 }
