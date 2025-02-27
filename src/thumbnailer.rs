@@ -117,8 +117,9 @@ pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &Path) -> bool {
 
 /// Searches standard directories for a .thumbnailer file supporting the given MIME type.
 /// Looks in:
-///   - /usr/share/thumbnailers
 ///   - $HOME/.local/share/thumbnailers
+///   - $XDG_DATA_DIRS/thumbnailers
+///   - /usr/share/thumbnailers
 fn find_thumbnailer(mime_type: &str) -> Result<Option<ThumbnailerConfig>, ThumbnailError> {
     debug!("Searching for .thumbnailer supporting MIME type: {}", mime_type);
 
@@ -127,6 +128,20 @@ fn find_thumbnailer(mime_type: &str) -> Result<Option<ThumbnailerConfig>, Thumbn
     if let Ok(home) = env::var("HOME") {
         dirs.push(PathBuf::from(home).join(".local/share/thumbnailers"));
     }
+
+    if let Ok(xdg_data_dirs) = env::var("XDG_DATA_DIRS") {
+        // Split the variable by `:` and collect as PathBuf
+        let data_dirs: Vec<PathBuf> = xdg_data_dirs
+            .split(':')
+            .map(PathBuf::from)
+            .collect();
+
+        // Print the directories
+        for dir in &data_dirs {
+            dirs.push(dir.join("thumbnailers"));
+        }
+    }
+
     dirs.push(PathBuf::from("/usr/share/thumbnailers"));
 
     for dir in dirs {
