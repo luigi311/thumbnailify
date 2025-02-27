@@ -1,10 +1,13 @@
-use std::env;
-use std::fs;
-use std::fs::File;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::UNIX_EPOCH;
+use log::{debug, info, warn};
+use std::{
+    env,
+    fs,
+    fs::File,
+    io,
+    path::{Path, PathBuf},
+    process::Command,
+    time::UNIX_EPOCH
+};
 
 use ini::Ini;
 use mime_guess;
@@ -12,12 +15,15 @@ use png::Decoder;
 use shell_words::split;
 use which::which;
 
-use crate::error::ThumbnailError;
-use crate::file::get_file_uri;
-use crate::file::write_failed_thumbnail;
-use crate::file::{get_failed_thumbnail_output, get_thumbnail_hash_output};
-use crate::hash::compute_hash;
-use crate::sizes::ThumbnailSize;
+use crate::{
+    error::ThumbnailError,
+    file::{
+        get_failed_thumbnail_output, get_file_uri, get_thumbnail_hash_output,
+        write_failed_thumbnail,
+    },
+    hash::compute_hash,
+    sizes::ThumbnailSize,
+};
 
 /// Holds configuration parsed from a .thumbnailer file.
 #[derive(Debug)]
@@ -26,7 +32,6 @@ struct ThumbnailerConfig {
     exec_line: String,
     _mime_types: Vec<String>,
 }
-
 
 /// Checks whether the thumbnail file at `thumb_path` is up to date with respect
 /// to the source image at `source_path`. It verifies two metadata fields in the PNG:
@@ -37,36 +42,60 @@ struct ThumbnailerConfig {
 /// Returns true if "Thumb::MTime" is present and matches the source file's modification time,
 /// and if "Thumb::Size" is present it must match the source file's size.
 pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &Path) -> bool {
+    debug!(
+        "Checking if thumbnail at {:?} is up-to-date with source {:?}",
+        thumb_path, source_path
+    );
+
     let file = match File::open(thumb_path) {
         Ok(f) => f,
-        Err(_) => return false,
+        Err(e) => {
+            debug!("Failed to open thumbnail {:?}: {}", thumb_path, e);
+            return false;
+        }
     };
 
     let decoder = Decoder::new(file);
     let reader = match decoder.read_info() {
         Ok(r) => r,
-        Err(_) => return false,
+        Err(e) => {
+            debug!("Failed to read PNG info for {:?}: {}", thumb_path, e);
+            return false;
+        }
     };
 
     let texts = &reader.info().uncompressed_latin1_text;
 
     let thumb_mtime_str = match texts.iter().find(|c| c.keyword == "Thumb::MTime") {
         Some(c) => &c.text,
-        None => return false,
+        None => {
+            debug!("Thumbnail missing 'Thumb::MTime' metadata chunk.");
+            return false;
+        }
     };
     let thumb_mtime = thumb_mtime_str.parse::<u64>().unwrap_or(0);
 
     let source_metadata = match std::fs::metadata(source_path) {
         Ok(m) => m,
-        Err(_) => return false,
+        Err(e) => {
+            debug!("Failed to get metadata of source {:?}: {}", source_path, e);
+            return false;
+        }
     };
 
     let source_modified_time = match source_metadata.modified() {
         Ok(mt) => mt.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-        Err(_) => return false,
+        Err(e) => {
+            debug!("Failed to read modified time of source {:?}: {}", source_path, e);
+            return false;
+        }
     };
 
     if thumb_mtime != source_modified_time {
+        debug!(
+            "Thumb::MTime mismatch: thumbnail={} source={}",
+            thumb_mtime, source_modified_time
+        );
         return false;
     }
 
@@ -74,10 +103,15 @@ pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &Path) -> bool {
         let thumb_size = chunk.text.parse::<u64>().unwrap_or(0);
         let source_file_size = source_metadata.len();
         if thumb_size != source_file_size {
+            debug!(
+                "Thumb::Size mismatch: thumbnail={} source={}",
+                thumb_size, source_file_size
+            );
             return false;
         }
     }
 
+    debug!("Thumbnail at {:?} is up-to-date with source {:?}", thumb_path, source_path);
     true
 }
 
@@ -86,16 +120,17 @@ pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &Path) -> bool {
 ///   - /usr/share/thumbnailers
 ///   - $HOME/.local/share/thumbnailers
 fn find_thumbnailer(mime_type: &str) -> Result<Option<ThumbnailerConfig>, ThumbnailError> {
+    debug!("Searching for .thumbnailer supporting MIME type: {}", mime_type);
+
     let mut dirs = Vec::new();
 
     if let Ok(home) = env::var("HOME") {
         dirs.push(PathBuf::from(home).join(".local/share/thumbnailers"));
     }
-
-    // Then check the system-wide thumbnailers.
     dirs.push(PathBuf::from("/usr/share/thumbnailers"));
 
     for dir in dirs {
+        debug!("Looking for thumbnailer files in {:?}", dir);
         if dir.is_dir() {
             for entry in fs::read_dir(&dir)? {
                 let entry = entry?;
@@ -110,15 +145,21 @@ fn find_thumbnailer(mime_type: &str) -> Result<Option<ThumbnailerConfig>, Thumbn
                                 .map(|s| s.trim().to_string())
                                 .collect();
                             if mimes.iter().any(|m| m == mime_type) {
+                                debug!("Found thumbnailer config in {:?}", path);
                                 let try_exec = section.get("TryExec").map(|s| s.to_string());
-                                let exec_line = section.get("Exec")
-                                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Missing Exec key"))?
+                                let exec_line = section
+                                    .get("Exec")
+                                    .ok_or_else(|| {
+                                        io::Error::new(io::ErrorKind::Other, "Missing Exec key")
+                                    })?
                                     .to_string();
-                                return Ok(Some(ThumbnailerConfig {
+
+                                let config = ThumbnailerConfig {
                                     try_exec,
                                     exec_line,
                                     _mime_types: mimes,
-                                }));
+                                };
+                                return Ok(Some(config));
                             }
                         }
                     }
@@ -126,10 +167,12 @@ fn find_thumbnailer(mime_type: &str) -> Result<Option<ThumbnailerConfig>, Thumbn
             }
         }
     }
+    debug!("No .thumbnailer found for MIME type: {}", mime_type);
     Ok(None)
 }
 
 /// Builds command arguments by replacing tokens in the Exec string.
+///
 /// Supported tokens:
 ///   - %s : maximum desired size (pixels)
 ///   - %u : URI of the file
@@ -143,19 +186,18 @@ fn build_command_args(
     input: &Path,
     output: &Path,
 ) -> Result<Vec<String>, ThumbnailError> {
-    let full_input_path = input.canonicalize()?;
-    let full_input_path_str = full_input_path
-        .to_str()
-        .ok_or_else(|| {
-            // Construct a ThumbnailError::Io (or any error variant you prefer):
-            ThumbnailError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Invalid path: {:?}", input),
-            ))
-        })?; 
-    let tokens = split(exec_line)?;
+    debug!("Building command args from exec_line: {}", exec_line);
 
-    Ok(tokens
+    let full_input_path = input.canonicalize()?;
+    let full_input_path_str = full_input_path.to_str().ok_or_else(|| {
+        ThumbnailError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Invalid path: {:?}", input),
+        ))
+    })?;
+
+    let tokens = split(exec_line)?;
+    let replaced: Vec<String> = tokens
         .into_iter()
         .map(|token| {
             token
@@ -165,12 +207,14 @@ fn build_command_args(
                 .replace("%i", full_input_path_str)
                 .replace("%o", output.to_str().unwrap_or(""))
         })
-        .collect())
+        .collect();
+
+    debug!("Command tokens after substitution: {:?}", replaced);
+    Ok(replaced)
 }
 
-
 /// Generates a thumbnail for the given file using the GNOME thumbnailer approach.
-/// 
+///
 /// This function:
 /// 1. Computes the file URI and MD5 hash.
 /// 2. Determines the cache output path using your helper (`get_thumbnail_hash_output`).
@@ -179,47 +223,67 @@ fn build_command_args(
 /// 5. Substitutes tokens into the Exec command and executes the thumbnailer.
 /// 6. On failure, writes a fail marker using your helper (`get_failed_thumbnail_output`).
 pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, ThumbnailError> {
+    info!("Generating thumbnail for {:?} with size {:?}", file, size);
+
     // Canonicalize the file and create a file URI.
     let abs_path = file.canonicalize()?;
     let file_str = abs_path.to_str().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Invalid file path",
-        )
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid file path")
     })?;
     let file_uri = get_file_uri(file)?;
+
     // Compute the MD5 hash from the file URI.
     let hash = compute_hash(&file_uri);
 
-    // If the fail marker exists and is up to date then return early
+    // Check if the fail marker exists and is up to date
     let fail_path = get_failed_thumbnail_output(&hash);
-    if fail_path.exists() && is_thumbnail_up_to_date(&fail_path,file) {
+    if fail_path.exists() && is_thumbnail_up_to_date(&fail_path, file) {
+        info!(
+            "A fail marker exists and is up-to-date, returning fail marker at {:?}",
+            fail_path
+        );
         return Ok(fail_path);
     }
 
     // Determine the expected output thumbnail path.
     let thumb_path = get_thumbnail_hash_output(&hash, size);
 
-    // 3a. If the thumbnail already exists and is up to date, return it immediately.
+    // If the thumbnail already exists and is up to date, return it immediately.
     if thumb_path.exists() && is_thumbnail_up_to_date(&thumb_path, file) {
+        info!(
+            "Cached thumbnail at {:?} is up-to-date, returning it",
+            thumb_path
+        );
         return Ok(thumb_path);
     }
 
     // Determine the file's MIME type.
     let mime = mime_guess::from_path(file).first_or_octet_stream();
     let mime_type = mime.essence_str();
+    debug!("Detected MIME type for {:?} as {}", file, mime_type);
 
     // Look for a thumbnailer that supports this MIME type.
     let config = match find_thumbnailer(mime_type)? {
-        Some(conf) => conf,
-        None => return Err(ThumbnailError::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, "No thumbnailer found for this MIME type")
-        )),
+        Some(conf) => {
+            debug!("Using thumbnailer config: {:?}", conf);
+            conf
+        }
+        None => {
+            warn!("No thumbnailer found for MIME type {}", mime_type);
+            return Err(ThumbnailError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No thumbnailer found for this MIME type",
+            )));
+        }
     };
 
     // If TryExec is specified, ensure that the executable exists.
     if let Some(ref exec_name) = config.try_exec {
         if which(exec_name).is_err() {
+            warn!(
+                "TryExec specified ({}) but could not be found on PATH.",
+                exec_name
+            );
             return Err(ThumbnailError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Thumbnailer executable not found",
@@ -227,7 +291,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
         }
     }
 
-    // Create a temporary file in the same directory as the final thumbnail.
+    // Prepare a temporary file in the same directory as the final thumbnail.
     // Using `tempfile_in` ensures that the temp file is on the same filesystem
     // so that we can atomically persist (rename) it.
     let thumb_dir = thumb_path.parent().ok_or_else(|| {
@@ -242,28 +306,28 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
 
     let temp_path = named_temp.path().to_owned();
 
-    // Build the command using the Exec line from the thumbnailer config,
-    // but pass the temporary file path as the output.
+    // Build the command using the Exec line from the thumbnailer config.
     let dimension = size.to_dimension();
     let args = build_command_args(&config.exec_line, dimension, &file_uri, &file, &temp_path)?;
 
-    // The first token is expected to be the executable.
-    let executable = args.get(0)
+    // The first token is the executable; the rest are arguments.
+    let executable = args
+        .get(0)
         .cloned()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Empty command"))?;
     let cmd_args = &args[1..];
 
+    debug!("Executing thumbnailer: {:?} {:?}", executable, cmd_args);
+
     // Check if Bubblewrap ("bwrap") is available.
     let status = if let Ok(bwrap_path) = which("bwrap") {
-        // If bwrap exists, run the command under Bubblewrap.
+        debug!("Running thumbnail command under bubblewrap sandbox.");
         let mut command = Command::new(bwrap_path);
-        // Bind /usr read-only.
+        // Minimal sandbox setup
         command.args(&["--ro-bind", "/usr", "/usr"]);
-        // Bind /etc/ld.so.cache and /etc/alternatives if possible.
         command.args(&["--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache"]);
         command.args(&["--ro-bind-try", "/etc/alternatives", "/etc/alternatives"]);
 
-        // Bind common directories.
         let usrmerged_dirs = ["bin", "lib64", "lib", "sbin"];
         for dir in &usrmerged_dirs {
             let absolute_dir = format!("/{}", dir);
@@ -279,14 +343,10 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
             }
         }
 
-        // Bind /proc and /dev.
         command.args(&["--proc", "/proc"]);
         command.args(&["--dev", "/dev"]);
-        // Change working directory to /
         command.args(&["--chdir", "/"]);
-        // Set environment variable.
         command.args(&["--setenv", "GIO_USE_VFS", "local"]);
-        // Unshare everything and die with parent.
         command.args(&["--unshare-all", "--die-with-parent"]);
 
         // Bind the thumbnail output directory so our temporary file is visible.
@@ -294,39 +354,44 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
             io::Error::new(io::ErrorKind::Other, "Invalid thumb_dir path")
         })?;
         command.args(&["--bind", thumb_dir_str, thumb_dir_str]);
-        
+
         // **Bind the source file** so that the sandboxed process can access it.
-        // We use the canonical path (file_str) for this.
         command.args(&["--ro-bind", file_str, file_str]);
 
-
-        // Finally, append the external command.
+        // Append the external command.
         command.arg("--");
         command.arg(&executable);
         command.args(cmd_args);
+
+        debug!("Final bubblewrap command: {:?}", command);
         command.status()?
     } else {
-        // Otherwise, run the command directly.
-        Command::new(&executable)
-            .args(cmd_args)
-            .status()?
+        debug!("Running thumbnail command directly (no bwrap).");
+        Command::new(&executable).args(cmd_args).status()?
     };
 
     if status.success() {
-        // Persist the temporary file atomically to the final thumbnail path.
+        info!("Thumbnail command succeeded; persisting thumbnail to {:?}", thumb_path);
         named_temp.persist(&thumb_path)?;
         Ok(thumb_path)
     } else {
-        // Clean up the temporary file (it will be deleted when dropped).
+        warn!(
+            "Thumbnail command failed with status: {:?}. Generating fail marker.",
+            status.code()
+        );
+        // Clean up temp file
         drop(named_temp);
-        // Thumbnail generation failed; write a failure marker.
+        // Write fail marker
         let fail_marker = get_failed_thumbnail_output(&hash);
         if let Some(parent) = fail_marker.parent() {
             fs::create_dir_all(parent)?;
         }
-        
         write_failed_thumbnail(&fail_marker, &fail_path)?;
-        Err(ThumbnailError::Io(std::io::Error::new(std::io::ErrorKind::Other, "Thumbnailer process failed")))
+
+        Err(ThumbnailError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Thumbnailer process failed",
+        )))
     }
 }
 
