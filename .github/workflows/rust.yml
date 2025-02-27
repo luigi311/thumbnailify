@@ -36,10 +36,10 @@ jobs:
           toolchain: 1.85
       
       - name: Install Deps
-        run: sudo apt-get update && sudo apt-get install -y libdav1d-dev
+        run: sudo apt-get update && sudo apt-get install -y libgdk-pixbuf2.0-bin
 
       - name: Build
-        run: cargo build --features avif
+        run: cargo build
       
       - name: Run tests
         run: cargo test --verbose
@@ -64,6 +64,9 @@ jobs:
         with:
           toolchain: 1.85
           target: ${{ matrix.target }}
+
+      - name: Install Deps
+        run: sudo apt-get update && sudo apt-get install -y libgdk-pixbuf2.0-bin
 
       - name: Build
         run: cargo build --target ${{ matrix.target }}
