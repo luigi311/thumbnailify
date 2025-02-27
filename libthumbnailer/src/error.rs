@@ -20,4 +20,7 @@ pub enum ThumbnailError {
 
     #[error("File persistence error: {0}")]
     Persist(#[from] tempfile::PersistError),
+
+    #[error("Shell parse error: {0}")]
+    Parse(#[from] shell_words::ParseError),
 }

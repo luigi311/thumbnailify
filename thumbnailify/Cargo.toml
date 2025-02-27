@@ -18,6 +18,7 @@ which = "7.0.2"
 rust-ini = "0.21.1"
 png = "0.17.16"
 tempfile = "3.17.1"
+shell-words = "1.1.0"
 
 [dev-dependencies]
 serial_test = "3"

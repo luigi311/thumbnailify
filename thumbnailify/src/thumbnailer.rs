@@ -9,6 +9,7 @@ use libthumbnailer::file::get_file_uri;
 use libthumbnailer::thumbnail::is_thumbnail_up_to_date;
 use libthumbnailer::ThumbnailError;
 use mime_guess;
+use shell_words::split;
 use which::which;
 
 use crate::file::write_failed_thumbnail;
@@ -86,10 +87,12 @@ fn build_command_args(
     file_uri: &str,
     input: &Path,
     output: &Path,
-) -> Vec<String> {
+) -> Result<Vec<String>, ThumbnailError> {
     let file_name = input.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    exec_line
-        .split_whitespace()
+    let tokens = split(exec_line)?;
+
+    Ok(tokens
+        .into_iter()
         .map(|token| {
             token
                 .replace("%%", "%")
@@ -98,7 +101,7 @@ fn build_command_args(
                 .replace("%i", file_name)
                 .replace("%o", output.to_str().unwrap_or(""))
         })
-        .collect()
+        .collect())
 }
 
 
@@ -172,7 +175,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
     // Build the command using the Exec line from the thumbnailer config,
     // but pass the temporary file path as the output.
     let dimension = size.to_dimension();
-    let args = build_command_args(&config.exec_line, dimension, &file_uri, file, &temp_path);
+    let args = build_command_args(&config.exec_line, dimension, &file_uri, file, &temp_path)?;
 
     // The first token is expected to be the executable.
     let executable = args.get(0)
