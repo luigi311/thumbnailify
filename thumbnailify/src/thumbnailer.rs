@@ -19,7 +19,7 @@ use crate::sizes::ThumbnailSize;
 struct ThumbnailerConfig {
     try_exec: Option<String>,
     exec_line: String,
-    mime_types: Vec<String>,
+    _mime_types: Vec<String>,
 }
 
 
@@ -60,7 +60,7 @@ fn find_thumbnailer(mime_type: &str) -> io::Result<Option<ThumbnailerConfig>> {
                                 return Ok(Some(ThumbnailerConfig {
                                     try_exec,
                                     exec_line,
-                                    mime_types: mimes,
+                                    _mime_types: mimes,
                                 }));
                             }
                         }
