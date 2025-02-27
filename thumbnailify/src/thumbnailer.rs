@@ -178,10 +178,64 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Empty command"))?;
     let cmd_args = &args[1..];
 
-    // Execute the external thumbnailer.
-    let status = Command::new(&executable)
-        .args(cmd_args)
-        .status()?;
+    // Check if Bubblewrap ("bwrap") is available.
+    let status = if let Ok(bwrap_path) = which("bwrap") {
+        // If bwrap exists, run the command under Bubblewrap.
+        let mut command = Command::new(bwrap_path);
+        // Bind /usr read-only.
+        command.args(&["--ro-bind", "/usr", "/usr"]);
+        // Bind /etc/ld.so.cache and /etc/alternatives if possible.
+        command.args(&["--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache"]);
+        command.args(&["--ro-bind-try", "/etc/alternatives", "/etc/alternatives"]);
+
+        // Bind common directories.
+        let usrmerged_dirs = ["bin", "lib64", "lib", "sbin"];
+        for dir in &usrmerged_dirs {
+            let absolute_dir = format!("/{}", dir);
+            if Path::new(&absolute_dir).exists() {
+                if let Ok(meta) = fs::symlink_metadata(&absolute_dir) {
+                    if meta.file_type().is_symlink() {
+                        let symlink_target = format!("/usr/{}", dir);
+                        command.args(&["--symlink", &symlink_target, &absolute_dir]);
+                    } else {
+                        command.args(&["--ro-bind", &absolute_dir, &absolute_dir]);
+                    }
+                }
+            }
+        }
+
+        // Bind /proc and /dev.
+        command.args(&["--proc", "/proc"]);
+        command.args(&["--dev", "/dev"]);
+        // Change working directory to /
+        command.args(&["--chdir", "/"]);
+        // Set environment variable.
+        command.args(&["--setenv", "GIO_USE_VFS", "local"]);
+        // Unshare everything and die with parent.
+        command.args(&["--unshare-all", "--die-with-parent"]);
+
+        // Bind the thumbnail output directory so our temporary file is visible.
+        let thumb_dir_str = thumb_dir.to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "Invalid thumb_dir path")
+        })?;
+        command.args(&["--bind", thumb_dir_str, thumb_dir_str]);
+        
+        // **Bind the source file** so that the sandboxed process can access it.
+        // We use the canonical path (file_str) for this.
+        command.args(&["--bind", file_str, file_str]);
+
+
+        // Finally, append the external command.
+        command.arg("--");
+        command.arg(&executable);
+        command.args(cmd_args);
+        command.status()?
+    } else {
+        // Otherwise, run the command directly.
+        Command::new(&executable)
+            .args(cmd_args)
+            .status()?
+    };
 
     if status.success() {
         // Persist the temporary file atomically to the final thumbnail path.
@@ -235,4 +289,5 @@ mod tests {
             );
         });
     }
+    
 }
