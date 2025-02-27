@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
 
+use image::{DynamicImage, Rgba, RgbaImage};
+use libthumbnailer::{write_out_thumbnail, ThumbnailError};
+
 use crate::sizes::ThumbnailSize;
 
 fn get_base_cache_dir() -> PathBuf {
@@ -30,4 +33,21 @@ pub fn get_failed_thumbnail_output(hash: &str) -> PathBuf {
     let fail_dir = get_base_cache_dir().join("thumbnails").join("fail").join("thumbnailify");
     let output_file = format!("{}.png", hash);
     fail_dir.join(output_file)
+}
+
+/// Writes a failed thumbnail using an empty (1x1 transparent) DynamicImage.
+pub fn write_failed_thumbnail(fail_path: &PathBuf, source_path: &str) -> Result<(), ThumbnailError> {
+    let fail_str = fail_path.to_str().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Invalid file path",
+        )
+    })?;
+
+    // Create a 1x1 transparent image.
+    let failed_img: DynamicImage = DynamicImage::ImageRgba8(
+        RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]))
+    );
+
+    write_out_thumbnail(fail_str, failed_img, source_path)
 }

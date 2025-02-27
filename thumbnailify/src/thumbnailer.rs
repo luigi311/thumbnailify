@@ -10,6 +10,7 @@ use libthumbnailer::thumbnail::is_thumbnail_up_to_date;
 use mime_guess;
 use which::which;
 
+use crate::file::write_failed_thumbnail;
 use crate::file::{get_failed_thumbnail_output, get_thumbnail_hash_output};
 use crate::hash::compute_hash;
 use crate::sizes::ThumbnailSize;
@@ -240,7 +241,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
     if status.success() {
         // Persist the temporary file atomically to the final thumbnail path.
         named_temp.persist(&thumb_path)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to persist thumbnail: {}", e)))?;
+            .map_err(|e: tempfile::PersistError| io::Error::new(io::ErrorKind::Other, format!("Failed to persist thumbnail: {}", e)))?;
         Ok(thumb_path)
     } else {
         // Clean up the temporary file (it will be deleted when dropped).
@@ -250,7 +251,10 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
         if let Some(parent) = fail_marker.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::File::create(&fail_marker)?;
+        
+        write_failed_thumbnail(&fail_marker, file_str)
+            .map_err(|e: libthumbnailer::ThumbnailError| io::Error::new(io::ErrorKind::Other, format!("Failed to create fail marker: {}", e)))?;
+
         Err(io::Error::new(io::ErrorKind::Other, "Thumbnailer process failed"))
     }
 }
@@ -258,11 +262,13 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use libthumbnailer::file::get_file_uri;
     use serial_test::serial;
     use tempfile::tempdir;
     use temp_env::with_var;
     
-    use crate::generate_thumbnail;
+    use crate::file::get_failed_thumbnail_output;
+    use crate::{compute_hash, generate_thumbnail};
     use crate::sizes::ThumbnailSize;
 
     #[test]
@@ -289,5 +295,38 @@ mod tests {
             );
         });
     }
-    
+
+    #[test]
+    #[serial] // Serialize tests modifying env vars
+    fn test_generate_thumbnail_broken_image() {
+        // Create a temporary directory for the thumbnail cache.
+        let temp_dir = tempdir().expect("Failed to create temporary directory for cache");
+        let temp_cache = temp_dir.path();
+
+        // Use temp_env to temporarily set XDG_CACHE_HOME.
+        with_var("XDG_CACHE_HOME", Some(temp_cache), || {
+            let test_image = PathBuf::from("../tests/images/broken.png");
+            
+            // Attempt to generate a thumbnail for the broken image.
+            let result = generate_thumbnail(&test_image, ThumbnailSize::Normal);
+            assert!(result.is_err(), "Expected thumbnail generation to fail for a broken image");
+
+            // Verify that a failure marker file was created.
+            let abs_path = test_image
+                .canonicalize()
+                .expect("Failed to canonicalize broken image path");
+            let file_str = abs_path
+                .to_str()
+                .expect("Failed to convert broken image path to string");
+            let file_uri = get_file_uri(file_str)
+                .expect("Failed to get file URI for broken image");
+            let hash = compute_hash(&file_uri);
+            let fail_marker = get_failed_thumbnail_output(&hash);
+            assert!(
+                fail_marker.exists(),
+                "Failure marker file should exist for a broken image at {:?}",
+                fail_marker
+            );
+        });
+    }
 }
