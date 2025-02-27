@@ -7,6 +7,7 @@ use std::process::Command;
 use ini::Ini;
 use libthumbnailer::file::get_file_uri;
 use libthumbnailer::thumbnail::is_thumbnail_up_to_date;
+use libthumbnailer::ThumbnailError;
 use mime_guess;
 use which::which;
 
@@ -28,7 +29,7 @@ struct ThumbnailerConfig {
 /// Looks in:
 ///   - /usr/share/thumbnailers
 ///   - $HOME/.local/share/thumbnailers
-fn find_thumbnailer(mime_type: &str) -> io::Result<Option<ThumbnailerConfig>> {
+fn find_thumbnailer(mime_type: &str) -> Result<Option<ThumbnailerConfig>, ThumbnailError> {
     let mut dirs = Vec::new();
 
     if let Ok(home) = env::var("HOME") {
@@ -44,8 +45,7 @@ fn find_thumbnailer(mime_type: &str) -> io::Result<Option<ThumbnailerConfig>> {
                 let entry = entry?;
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("thumbnailer") {
-                    let conf = Ini::load_from_file(&path)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to load {:?}: {}", path, e)))?;
+                    let conf = Ini::load_from_file(&path)?;
                     if let Some(section) = conf.section(Some("Thumbnailer Entry")) {
                         if let Some(mime_list) = section.get("MimeType") {
                             let mimes: Vec<String> = mime_list
@@ -111,7 +111,7 @@ fn build_command_args(
 /// 4. Detects the file’s MIME type and searches for an appropriate thumbnailer.
 /// 5. Substitutes tokens into the Exec command and executes the thumbnailer.
 /// 6. On failure, writes a fail marker using your helper (`get_failed_thumbnail_output`).
-pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBuf> {
+pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, ThumbnailError> {
     // Canonicalize the file and create a file URI.
     let abs_path = file.canonicalize()?;
     let file_str = abs_path.to_str().ok_or_else(|| {
@@ -120,9 +120,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
             "Invalid file path",
         )
     })?;
-    let file_uri = get_file_uri(file_str)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to get file URI: {}", e)))?;
-
+    let file_uri = get_file_uri(file_str)?;
     // Compute the MD5 hash from the file URI.
     let hash = compute_hash(&file_uri);
 
@@ -141,15 +139,18 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
     // Look for a thumbnailer that supports this MIME type.
     let config = match find_thumbnailer(mime_type)? {
         Some(conf) => conf,
-        None => {
-            return Err(io::Error::new(io::ErrorKind::Other, "No thumbnailer found for this MIME type"));
-        }
+        None => return Err(ThumbnailError::Io(
+            std::io::Error::new(std::io::ErrorKind::Other, "No thumbnailer found for this MIME type")
+        )),
     };
 
     // If TryExec is specified, ensure that the executable exists.
     if let Some(ref exec_name) = config.try_exec {
         if which(exec_name).is_err() {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "Thumbnailer executable not found"));
+            return Err(ThumbnailError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Thumbnailer executable not found",
+            )));
         }
     }
 
@@ -240,8 +241,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
 
     if status.success() {
         // Persist the temporary file atomically to the final thumbnail path.
-        named_temp.persist(&thumb_path)
-            .map_err(|e: tempfile::PersistError| io::Error::new(io::ErrorKind::Other, format!("Failed to persist thumbnail: {}", e)))?;
+        named_temp.persist(&thumb_path)?;
         Ok(thumb_path)
     } else {
         // Clean up the temporary file (it will be deleted when dropped).
@@ -252,10 +252,8 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> io::Result<PathBu
             fs::create_dir_all(parent)?;
         }
         
-        write_failed_thumbnail(&fail_marker, file_str)
-            .map_err(|e: libthumbnailer::ThumbnailError| io::Error::new(io::ErrorKind::Other, format!("Failed to create fail marker: {}", e)))?;
-
-        Err(io::Error::new(io::ErrorKind::Other, "Thumbnailer process failed"))
+        write_failed_thumbnail(&fail_marker, file_str)?;
+        Err(ThumbnailError::Io(std::io::Error::new(std::io::ErrorKind::Other, "Thumbnailer process failed")))
     }
 }
 

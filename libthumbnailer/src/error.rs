@@ -13,5 +13,11 @@ pub enum ThumbnailError {
 
     /// Wraps standard I/O errors.
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] std::io::Error),    
+
+    #[error("INI config error: {0}")]
+    Ini(#[from] ini::Error),
+
+    #[error("File persistence error: {0}")]
+    Persist(#[from] tempfile::PersistError),
 }

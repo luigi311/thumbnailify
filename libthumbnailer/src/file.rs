@@ -2,7 +2,7 @@ use std::{fs::File, io::BufWriter, path::PathBuf, time::UNIX_EPOCH};
 use jxl_oxide::integration::JxlDecoder;
 use url::Url;
 use std::path::Path;
-use image::{DynamicImage, ImageReader, Limits, Rgba, RgbaImage};
+use image::{DynamicImage, ImageReader, Limits, RgbaImage};
 use png::Encoder;
 
 use crate::error::ThumbnailError;
