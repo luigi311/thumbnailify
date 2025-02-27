@@ -282,7 +282,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
         
         // **Bind the source file** so that the sandboxed process can access it.
         // We use the canonical path (file_str) for this.
-        command.args(&["--bind", file_str, file_str]);
+        command.args(&["--ro-bind", file_str, file_str]);
 
 
         // Finally, append the external command.
