@@ -6,6 +6,7 @@ description = "A Rust library for generating and caching thumbnails using the GN
 license = "GPL-3.0"
 repository = "https://github.com/luigi311/thumbnailify"
 
+rust-version = "1.85"
 edition = "2024"
 resolver = "3"
 
