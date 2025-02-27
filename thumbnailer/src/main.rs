@@ -1,7 +1,7 @@
 use clap::Parser;
 use image::DynamicImage;
 use std::process;
-use thumbnailify::{generate_thumbnail, parse_file, write_out_thumbnail, ThumbnailError};
+use libthumbnailer::{generate_thumbnail, parse_file, write_out_thumbnail, ThumbnailError};
 
 /// Thumbnail images
 #[derive(Parser, Debug)]

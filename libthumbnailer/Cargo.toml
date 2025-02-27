@@ -1,0 +1,28 @@
+[package]
+name = "libthumbnailer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "libthumbnailer"
+
+[dependencies]
+clap = { version = "4.5.31", features = ["derive"] }
+dirs = "6.0.0"
+fast_image_resize = { version = "5.1.2", features = ["image"] }
+image = { version = "0.25.5" }
+jxl-oxide = { version = "0.11.2", features = ["image"] }
+md-5 = "0.10.6"
+png = "0.17.16"
+thiserror = "2.0.11"
+url = "2.5.4"
+
+[features]
+avif = ["image/avif-native"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "benchmark"
+harness = false

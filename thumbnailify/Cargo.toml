@@ -8,20 +8,17 @@ name = "thumbnailify"
 
 [dependencies]
 dirs = "6.0.0"
-fast_image_resize = { version = "5.1.2", features = ["image"] }
-image = { version = "0.25.5" }
-jxl-oxide = { version = "0.11.2", features = ["image"] }
 md-5 = "0.10.6"
-png = "0.17.16"
 thiserror = "2.0.11"
 url = "2.5.4"
-
-[features]
-avif = ["image/avif-native"]
+image = { version = "0.25.5" }
+libthumbnailer = { path = "../libthumbnailer" }
+mime_guess = "2.0.5"
+which = "7.0.2"
+rust-ini = "0.21.1"
+png = "0.17.16"
+tempfile = "3.17.1"
 
 [dev-dependencies]
-criterion = "0.5"
-
-[[bench]]
-name = "benchmark"
-harness = false
+serial_test = "3"
+temp-env = "0.3.6"

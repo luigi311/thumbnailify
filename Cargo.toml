@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "libthumbnailer",
     "thumbnailify",
     "thumbnailer"
 ]

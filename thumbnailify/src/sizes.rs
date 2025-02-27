@@ -4,6 +4,8 @@ pub enum ThumbnailSize {
     Small,
     Normal,
     Large,
+    XLarge,
+    XXLarge,
 }
 
 impl ThumbnailSize {
@@ -18,16 +20,20 @@ impl ThumbnailSize {
             ThumbnailSize::Small => 64,
             ThumbnailSize::Normal => 128,
             ThumbnailSize::Large => 256,
+            ThumbnailSize::XLarge => 512,
+            ThumbnailSize::XXLarge => 1024,
         }
     }
 }
 
 impl std::fmt::Display for ThumbnailSize {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-         match self {
-             ThumbnailSize::Small => write!(f, "small"),
-             ThumbnailSize::Normal => write!(f, "normal"),
-             ThumbnailSize::Large => write!(f, "large"),
-         }
+        match self {
+            ThumbnailSize::Small => write!(f, "small"),
+            ThumbnailSize::Normal => write!(f, "normal"),
+            ThumbnailSize::Large => write!(f, "large"),
+            ThumbnailSize::XLarge => write!(f, "x-large"),
+            ThumbnailSize::XXLarge => write!(f, "xx-large"),
+        }
     }
 }

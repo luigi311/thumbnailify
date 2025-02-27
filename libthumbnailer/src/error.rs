@@ -13,5 +13,5 @@ pub enum ThumbnailError {
 
     /// Wraps standard I/O errors.
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error)
+    Io(#[from] std::io::Error),
 }
