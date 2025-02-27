@@ -143,7 +143,15 @@ fn build_command_args(
     input: &Path,
     output: &Path,
 ) -> Result<Vec<String>, ThumbnailError> {
-    let file_name = input.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let full_input_path = input
+        .to_str()
+        .ok_or_else(|| {
+            // Construct a ThumbnailError::Io (or any error variant you prefer):
+            ThumbnailError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid path: {:?}", input),
+            ))
+        })?; 
     let tokens = split(exec_line)?;
 
     Ok(tokens
@@ -153,7 +161,7 @@ fn build_command_args(
                 .replace("%%", "%")
                 .replace("%s", &size.to_string())
                 .replace("%u", file_uri)
-                .replace("%i", file_name)
+                .replace("%i", full_input_path)
                 .replace("%o", output.to_str().unwrap_or(""))
         })
         .collect())
