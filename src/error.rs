@@ -19,4 +19,7 @@ pub enum ThumbnailError {
 
     #[error("Shell parse error: {0}")]
     Parse(#[from] shell_words::ParseError),
+
+    #[error("PNG error: {0}")]
+    Png(#[from] png::EncodingError),
 }

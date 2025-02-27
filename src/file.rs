@@ -1,4 +1,4 @@
-use std::{fs::File, io::BufWriter, path::PathBuf, time::UNIX_EPOCH};
+use std::{fs::File, io::BufWriter, path::{Path, PathBuf}, time::UNIX_EPOCH};
 
 
 use image::{DynamicImage, Rgba, RgbaImage};
@@ -37,7 +37,7 @@ pub fn get_failed_thumbnail_output(hash: &str) -> PathBuf {
 }
 
 /// Writes a failed thumbnail using an empty (1x1 transparent) DynamicImage.
-pub fn write_failed_thumbnail(fail_path: &PathBuf, source_path: &str) -> Result<(), ThumbnailError> {
+pub fn write_failed_thumbnail(fail_path: &Path, source_path: &str) -> Result<(), ThumbnailError> {
     let fail_str = fail_path.to_str().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -86,36 +86,22 @@ pub fn write_out_thumbnail(
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
 
-    encoder.add_text_chunk("Software".to_string(), "Thumbnailify".to_string())
-        .map_err(map_png_err)?;
+    encoder.add_text_chunk("Software".to_string(), "Thumbnailify".to_string())?;
 
     let uri = get_file_uri(source_image_path)?;
-    encoder.add_text_chunk("Thumb::URI".to_string(), uri)
-        .map_err(map_png_err)?;
+    encoder.add_text_chunk("Thumb::URI".to_string(), uri)?;
 
     let metadata = std::fs::metadata(source_image_path)?;
 
     let size = metadata.len();
-    encoder.add_text_chunk("Thumb::Size".to_string(), size.to_string())
-        .map_err(map_png_err)?;
+    encoder.add_text_chunk("Thumb::Size".to_string(), size.to_string())?;
 
     let modified_time = metadata.modified()?;
     let mtime_unix = modified_time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    encoder.add_text_chunk("Thumb::MTime".to_string(), mtime_unix.to_string())
-        .map_err(map_png_err)?;
+    encoder.add_text_chunk("Thumb::MTime".to_string(), mtime_unix.to_string())?;
 
-    let mut writer = encoder.write_header().map_err(map_png_err)?;
-    writer.write_image_data(&buffer).map_err(map_png_err)?;
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&buffer)?;
 
     Ok(())
-}
-
-// Helper function to map `png::EncodingError` -> `ThumbnailError`.
-fn map_png_err(err: png::EncodingError) -> ThumbnailError {
-    // We'll convert it to `image::ImageError::IoError`, which then becomes `ThumbnailError::Image(...)`.
-    // Or, since we have direct Io errors in our enum, we can do that. But let's keep it simple:
-    ThumbnailError::Image(image::ImageError::IoError(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("PNG encoding error: {err}"),
-    )))
 }
