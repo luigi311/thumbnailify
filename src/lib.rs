@@ -4,5 +4,6 @@ pub mod hash;
 pub mod thumbnailer;
 pub mod error;
 
-pub use hash::compute_hash;
 pub use thumbnailer::generate_thumbnail;
+pub use sizes::ThumbnailSize;
+pub use error::ThumbnailError;

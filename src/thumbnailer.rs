@@ -182,6 +182,12 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
     // Compute the MD5 hash from the file URI.
     let hash = compute_hash(&file_uri);
 
+    // If the fail marker exists and is up to date then return early
+    let fail_path = get_failed_thumbnail_output(&hash);
+    if fail_path.exists() && is_thumbnail_up_to_date(&fail_path,file_str) {
+        return Ok(fail_path);
+    }
+
     // Determine the expected output thumbnail path.
     let thumb_path = get_thumbnail_hash_output(&hash, size);
 
@@ -323,8 +329,9 @@ mod tests {
     use temp_env::with_var;
     
     use crate::file::{get_failed_thumbnail_output, get_file_uri};
-    use crate::{compute_hash, generate_thumbnail};
-    use crate::sizes::ThumbnailSize;
+    use crate::generate_thumbnail;
+    use crate::hash::compute_hash;
+    use crate::ThumbnailSize;
 
     #[test]
     #[serial] // Ensure this test runs in isolation.
