@@ -36,7 +36,7 @@ struct ThumbnailerConfig {
 ///
 /// Returns true if "Thumb::MTime" is present and matches the source file's modification time,
 /// and if "Thumb::Size" is present it must match the source file's size.
-pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &str) -> bool {
+pub fn is_thumbnail_up_to_date(thumb_path: &Path, source_path: &Path) -> bool {
     let file = match File::open(thumb_path) {
         Ok(f) => f,
         Err(_) => return false,
@@ -143,7 +143,8 @@ fn build_command_args(
     input: &Path,
     output: &Path,
 ) -> Result<Vec<String>, ThumbnailError> {
-    let full_input_path = input
+    let full_input_path = input.canonicalize()?;
+    let full_input_path_str = full_input_path
         .to_str()
         .ok_or_else(|| {
             // Construct a ThumbnailError::Io (or any error variant you prefer):
@@ -161,7 +162,7 @@ fn build_command_args(
                 .replace("%%", "%")
                 .replace("%s", &size.to_string())
                 .replace("%u", file_uri)
-                .replace("%i", full_input_path)
+                .replace("%i", full_input_path_str)
                 .replace("%o", output.to_str().unwrap_or(""))
         })
         .collect())
@@ -186,13 +187,13 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
             "Invalid file path",
         )
     })?;
-    let file_uri = get_file_uri(file_str)?;
+    let file_uri = get_file_uri(file)?;
     // Compute the MD5 hash from the file URI.
     let hash = compute_hash(&file_uri);
 
     // If the fail marker exists and is up to date then return early
     let fail_path = get_failed_thumbnail_output(&hash);
-    if fail_path.exists() && is_thumbnail_up_to_date(&fail_path,file_str) {
+    if fail_path.exists() && is_thumbnail_up_to_date(&fail_path,file) {
         return Ok(fail_path);
     }
 
@@ -200,7 +201,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
     let thumb_path = get_thumbnail_hash_output(&hash, size);
 
     // 3a. If the thumbnail already exists and is up to date, return it immediately.
-    if thumb_path.exists() && is_thumbnail_up_to_date(&thumb_path, file_str) {
+    if thumb_path.exists() && is_thumbnail_up_to_date(&thumb_path, file) {
         return Ok(thumb_path);
     }
 
@@ -244,7 +245,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
     // Build the command using the Exec line from the thumbnailer config,
     // but pass the temporary file path as the output.
     let dimension = size.to_dimension();
-    let args = build_command_args(&config.exec_line, dimension, &file_uri, file, &temp_path)?;
+    let args = build_command_args(&config.exec_line, dimension, &file_uri, &file, &temp_path)?;
 
     // The first token is expected to be the executable.
     let executable = args.get(0)
@@ -324,7 +325,7 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
             fs::create_dir_all(parent)?;
         }
         
-        write_failed_thumbnail(&fail_marker, file_str)?;
+        write_failed_thumbnail(&fail_marker, &fail_path)?;
         Err(ThumbnailError::Io(std::io::Error::new(std::io::ErrorKind::Other, "Thumbnailer process failed")))
     }
 }
@@ -382,13 +383,7 @@ mod tests {
             assert!(result.is_err(), "Expected thumbnail generation to fail for a broken image");
 
             // Verify that a failure marker file was created.
-            let abs_path = test_image
-                .canonicalize()
-                .expect("Failed to canonicalize broken image path");
-            let file_str = abs_path
-                .to_str()
-                .expect("Failed to convert broken image path to string");
-            let file_uri = get_file_uri(file_str)
+            let file_uri = get_file_uri(&test_image)
                 .expect("Failed to get file URI for broken image");
             let hash = compute_hash(&file_uri);
             let fail_marker = get_failed_thumbnail_output(&hash);
