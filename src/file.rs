@@ -37,24 +37,17 @@ pub fn get_failed_thumbnail_output(hash: &str) -> PathBuf {
 }
 
 /// Writes a failed thumbnail using an empty (1x1 transparent) DynamicImage.
-pub fn write_failed_thumbnail(fail_path: &Path, source_path: &str) -> Result<(), ThumbnailError> {
-    let fail_str = fail_path.to_str().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Invalid file path",
-        )
-    })?;
-
+pub fn write_failed_thumbnail(fail_path: &Path, source_path: &Path) -> Result<(), ThumbnailError> {
     // Create a 1x1 transparent image.
     let failed_img: DynamicImage = DynamicImage::ImageRgba8(
         RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]))
     );
 
-    write_out_thumbnail(fail_str, failed_img, source_path)
+    write_out_thumbnail(fail_path, failed_img, source_path)
 }
 
 /// Attempts to convert the file path into a file URI.
-pub fn get_file_uri(input: &str) -> Result<String, ThumbnailError> {
+pub fn get_file_uri(input: &Path) -> Result<String, ThumbnailError> {
     // Attempt to canonicalize the input to get the full file path.
     // If canonicalize fails, fall back to the raw `input` PathBuf.
     let canonical = std::fs::canonicalize(input).unwrap_or_else(|_| PathBuf::from(input));
@@ -72,9 +65,9 @@ pub fn get_file_uri(input: &str) -> Result<String, ThumbnailError> {
 /// - `Thumb::Size`
 /// - `Thumb::MTime`
 pub fn write_out_thumbnail(
-    image_path: &str,
+    image_path: &Path,
     img: DynamicImage,
-    source_image_path: &str,
+    source_image_path: &Path,
 ) -> Result<(), ThumbnailError> {
     let file = File::create(image_path)?;
 
