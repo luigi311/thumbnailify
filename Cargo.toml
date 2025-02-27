@@ -9,6 +9,13 @@ repository = "https://github.com/luigi311/thumbnailify"
 edition = "2024"
 resolver = "3"
 
+include = [
+    "**/*.rs",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+]
+
 [lib]
 name = "thumbnailify"
 
