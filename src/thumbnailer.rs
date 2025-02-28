@@ -18,8 +18,7 @@ use which::which;
 use crate::{
     error::ThumbnailError,
     file::{
-        get_failed_thumbnail_output, get_file_uri, get_thumbnail_hash_output,
-        write_failed_thumbnail,
+        add_thumbnail_metadata, get_failed_thumbnail_output, get_file_uri, get_thumbnail_hash_output, write_failed_thumbnail
     },
     hash::compute_hash,
     sizes::ThumbnailSize,
@@ -386,7 +385,9 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
     };
 
     if status.success() {
-        info!("Thumbnail command succeeded; persisting thumbnail to {:?}", thumb_path);
+        add_thumbnail_metadata(&temp_path, &abs_path)?;
+
+        info!("Thumbnail command succeeded; persisting thumbnail to {:?}", thumb_path);        
         named_temp.persist(&thumb_path)?;
         Ok(thumb_path)
     } else {
@@ -396,12 +397,15 @@ pub fn generate_thumbnail(file: &Path, size: ThumbnailSize) -> Result<PathBuf, T
         );
         // Clean up temp file
         drop(named_temp);
+
         // Write fail marker
         let fail_marker = get_failed_thumbnail_output(&hash);
         if let Some(parent) = fail_marker.parent() {
             fs::create_dir_all(parent)?;
         }
+        
         write_failed_thumbnail(&fail_marker, &fail_path)?;
+        add_thumbnail_metadata(&fail_path, &abs_path)?;
 
         Err(ThumbnailError::Io(std::io::Error::new(
             std::io::ErrorKind::Other,
