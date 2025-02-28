@@ -1,6 +1,6 @@
 [package]
 name = "thumbnailify"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Luis Garcia <git@luigi311.com>"]
 description = "A Rust library for generating and caching thumbnails using the GNOME thumbnailer approach."
 license = "GPL-3.0"
