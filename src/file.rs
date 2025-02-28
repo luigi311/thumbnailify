@@ -1,13 +1,13 @@
 use log::{debug, info}; // <-- Logging macros
 use std::{
     fs::File,
-    io::BufWriter,
+    io::{BufReader, BufWriter},
     path::{Path, PathBuf},
     time::UNIX_EPOCH
 };
 
 use image::{DynamicImage, Rgba, RgbaImage};
-use png::Encoder;
+use png::{Decoder, Encoder};
 use url::Url;
 
 use crate::{error::ThumbnailError, sizes::ThumbnailSize};
@@ -108,6 +108,44 @@ pub fn write_out_thumbnail(
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
 
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&buffer)?;
+
+    debug!("Successfully wrote thumbnail file to {:?}", image_path);
+    Ok(())
+}
+
+pub fn add_thumbnail_metadata(thumb_path: &Path, source_image_path: &Path) -> Result<(), ThumbnailError> {
+    debug!("Adding thumbnail metadata to {:?}", thumb_path);
+    
+    let file_in = File::open(thumb_path)?;
+    let reader = BufReader::new(file_in);
+
+    // Decode the PNG
+    let decoder = Decoder::new(reader);
+    let mut reader = decoder.read_info()?;
+
+    // Extract existing metadata 
+    let info = reader.info();
+    let existing_text = &info.uncompressed_latin1_text.clone();
+
+    let mut buf = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut buf)?;
+
+    // Re-encode with updated metadata
+    // Overwrite the same file (be sure to keep backups in real usage)
+    let file_out = File::create(thumb_path)?;
+    let w = BufWriter::new(file_out);
+
+    let mut encoder = Encoder::new(w, reader.info().width, reader.info().height);
+    encoder.set_color(reader.info().color_type);
+    encoder.set_depth(reader.info().bit_depth);
+
+    // Copy existing text chunks into the new file
+    for chunk in existing_text {
+        encoder.add_text_chunk(chunk.keyword.clone(), chunk.text.clone())?;
+    }
+
     encoder.add_text_chunk("Software".to_string(), "Thumbnailify".to_string())?;
 
     let uri = get_file_uri(source_image_path)?;
@@ -122,14 +160,16 @@ pub fn write_out_thumbnail(
     let mtime_unix = modified_time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     encoder.add_text_chunk("Thumb::MTime".to_string(), mtime_unix.to_string())?;
 
+    // Write out the PNG header
+    let mut writer = encoder.write_header()?;
+
+    // Write image data
+    writer.write_image_data(&buf)?;
+
     debug!(
-        "Embedding PNG metadata: URI, Size={}, MTime={} for thumbnail at {:?}",
-        size, mtime_unix, image_path
+        "Embedded PNG metadata: URI, Size={}, MTime={}",
+        size, mtime_unix
     );
 
-    let mut writer = encoder.write_header()?;
-    writer.write_image_data(&buffer)?;
-
-    debug!("Successfully wrote thumbnail file to {:?}", image_path);
     Ok(())
 }
